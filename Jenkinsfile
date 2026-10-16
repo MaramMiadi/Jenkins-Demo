@@ -1,99 +1,71 @@
 pipeline {
     agent any
-
     environment {
-        // The MY_KUBECONFIG environment variable will be assigned
-        // the value of a temporary file.  For example:
-        //   /home/user/.jenkins/workspace/cred_test@tmp/secretFiles/546a5cf3-9b56-4165-a0fd-19e2afe6b31f/kubeconfig.txt
-        // MY_KUBECONFIG = credentials('my-kubeconfig')
-        registry = "wahidh007/demo-jenkins"
-        registryCredential = 'docker-hub-credentials'
-        dockerImage = ''        
+        IMAGE_NAME     = 'jenkins-demo'
+        CONTAINER_NAME = 'jenkins-demo'
+        CONTAINER_PORT = '2222'
+        HOST_PORT      = '2222'
     }
-
-
-    // tools {
-    //     // Install the Maven version configured as "M3" and add it to the path.
-    //     maven "M3"
-    // }
-
-    // Poll every 5 minutes, if there is a new code Jenkins will run the job
-    triggers {
-        pollSCM('*/5 * * * *')
-    }
-
     stages {
         stage('Clone Repo') {
             steps {
-                git branch: 'main', url: 'https://github.com/wahid007/Jenkins-Demo.git'
-                // git 'https://github.com/wahid007/Jenkins-Demo'
+                git branch: 'main',
+                    url: 'https://github.com/Sen-Se1/jenkins-freestyle-demo.git'
+                echo 'Repository cloned successfully!'
             }
-
         }
-        
-        stage('Build App') {
+        stage('Build Project') {
             steps {
-                sh "mvn clean package"
+                withMaven(maven: 'Maven-3.10.0') {
+                    sh 'mvn -B clean package'
+                }
+            }
+            post {
+                success {
+                    archiveArtifacts(
+                        artifacts: 'target/devOpsDemo-0.0.1-SNAPSHOT.jar',
+                        fingerprint: true
+                    )
+                }
             }
         }
-        
-        stage('Build image') {
-          steps{
-              // sh "docker build -t $registry:$BUILD_NUMBER ."
-              script {
-                dockerImage = docker.build registry + ":$BUILD_NUMBER"   
-              }          
-          }
-        }       
-
-        // // Add docker hub credentials in Jenkins : Go to Credentials → Global → Add credentials 
-        // stage('Push image') {
-        //   steps{
-        //     script {
-        //       // docker.withRegistry('https://registry.hub.docker.com', registryCredential) {
-        //       docker.withRegistry('', registryCredential ) {
-        //         dockerImage.push()
-        //       }
-        //     }
-        //   }
-        // }
-
-        stage('Deploy Docker container'){
-          steps {
-            // sh "docker stop ${IMAGE_NAME} || true && docker rm $registry:$BUILD_NUMBER || true"
-            sh "docker run --name demo-jenkins -d -p 2222:2222 $registry:$BUILD_NUMBER"
-            slackSend color: "good", message: registry + ":$BUILD_NUMBER" + " - image successfully created! :man_dancing:"
-          }
+        stage('Initialize Docker') {
+            steps {
+                withDockerServer([
+                    uri: 'unix:///var/run/docker.sock',
+                    credentialsId: ''
+                ]) {
+                    echo 'Docker server initialized successfully!'
+                }
+            }
         }
-
-        // stage('Deploy K8S'){
-        //   steps {
-        //     sh "kubectl apply -f k8s.yml"
-        //   }
-        // }
-
-        // stage('Verify deployment'){
-        //   steps {
-        //     sh "kubectl get pods"
-        //     sh "kubectl get svc"
-        //   }
-        // }
-
-        // stage('Cleaning up') {
-        //   steps{
-        //     sh "docker rmi $registry:$BUILD_NUMBER"
-        //   }
-        // }        
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    def appImage = docker.build(
+                        "${IMAGE_NAME}:latest"
+                    )
+                    echo "Docker image built: ${IMAGE_NAME}:latest"
+                }
+            }
+        }
+        stage('Deploy Docker Container') {
+            steps {
+                script {
+                    docker.image("${IMAGE_NAME}:latest").run(
+                        "-d --name ${CONTAINER_NAME} -p ${HOST_PORT}:${CONTAINER_PORT}"
+                    )
+                    echo "Docker container ${CONTAINER_NAME} started successfully!"
+                }
+            }
+        }
     }
-    
     post {
         success {
-            echo 'Pipeline execution successful!'
-            slackSend color: "good", message: "Pipeline execution successful! :man_dancing:"
+            echo 'All pipeline stages completed.'
         }
         failure {
-            echo 'Pipeline execution failed.'
-            slackSend color: "danger", message: "Pipeline execution failed! :ghost:"
+            echo 'Pipeline failed. Check the Console Output.'
         }
-    }    
+    }
 }
